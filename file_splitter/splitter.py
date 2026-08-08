@@ -6,6 +6,7 @@ import hashlib
 import json
 import struct
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 try:
     from .constants import DEFAULT_BUFFER_SIZE, DEFAULT_PART_SIZE
@@ -181,13 +182,19 @@ def split_file(
     include_hashes: bool = False,
     base_url: str | None = None,
     is_pkg: bool = False,
+    is_ps3: bool = False,
 ) -> Path:
-    """Split a file and create a JSON manifest.
+    """Split a file and create a manifest.
+
+    Output format depends on the mode:
+    - default: JSON manifest (``Manifest``)
+    - ``is_pkg=True``: PS4-style JSON manifest (requires ``base_url``)
+    - ``is_ps3=True``: PS3 ``hfs_manifest`` XML (requires ``base_url``)
 
     Returns the manifest path.
     """
     def log(msg: str, level: str = "INFO"):
-        if is_pkg or level == "ERROR":
+        if is_pkg or is_ps3 or level == "ERROR":
             prefix = {"INFO": "[INFO]", "SUCCESS": "[OK]", "ERROR": "[ERROR]", "WARN": "[WARN]"}.get(level, "[*]")
             print(f"{prefix} {msg}")
 
@@ -195,6 +202,10 @@ def split_file(
         raise ValueError("part_size must be > 0")
     if buffer_size <= 0:
         raise ValueError("buffer_size must be > 0")
+    if is_pkg and is_ps3:
+        raise ValueError("--pkg and --ps3 are mutually exclusive")
+    if is_ps3 and not base_url:
+        raise ValueError("base_url is required for PS3 (hfs_manifest) output")
 
     source = Path(input_path).resolve()
     if not source.is_file():
@@ -211,10 +222,17 @@ def split_file(
     part_index = 0
     global_hash = hashlib.sha256() if include_hashes else None
 
+    expected_parts = (file_size + part_size - 1) // part_size if file_size else 0
+    if is_ps3:
+        index_digits = max(2, len(str(expected_parts)))
+
     with source.open("rb") as src:
         while offset < file_size:
             target = min(part_size, file_size - offset)
-            part_name = f"{base_name}.part{part_index}"
+            if is_ps3:
+                part_name = f"{source.stem}_{part_index:0{index_digits}d}{source.suffix}"
+            else:
+                part_name = f"{base_name}.part{part_index}"
             part_path = out_dir / part_name
 
             part_hash = hashlib.sha256() if include_hashes else None
@@ -241,7 +259,7 @@ def split_file(
 
             sha1_value = part_sha1.hexdigest() if part_sha1 else None
 
-            if is_pkg and base_url:
+            if (is_pkg or is_ps3) and base_url:
                 part_url = f"{base_url.rstrip('/')}/{part_name}"
             else:
                 part_url = None
@@ -289,6 +307,26 @@ def split_file(
         with open(manifest_path, 'w', encoding='utf-8') as f:
             json.dump(manifest_data, f, indent=2)
         log(f"Manifesto PS4 salvo: {manifest_path}", "SUCCESS")
+    elif is_ps3:
+        manifest_lines = [
+            "<hfs_manifest>",
+            f"<file_name>{escape(base_name)}</file_name>",
+            f"<file_size>{file_size}</file_size>",
+            f"<number_of_split_files>{len(parts)}</number_of_split_files>",
+        ]
+        for part in parts:
+            manifest_lines.append(
+                f'<pieces file_size="{part.size}" index="{part.part}" '
+                f'url="{escape(part.url or "")}"/>'
+            )
+        manifest_lines.append("</hfs_manifest>")
+        manifest_path = out_dir / f"{base_name}.hfs_manifest.xml"
+        manifest_path.write_text(
+            "\n".join(manifest_lines) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        log(f"Manifesto PS3 salvo: {manifest_path}", "SUCCESS")
     else:
         manifest = Manifest(
             file_name=base_name,

@@ -16,6 +16,22 @@ Com hash por parte + hash final:
 python -m file_splitter split "C:\caminho\arquivo.bin" --with-hash
 ```
 
+### Split com manifesto PS4 (JSON)
+
+```bash
+python -m file_splitter split "C:\caminho\game.pkg" --pkg --base-url "http://host.com/download"
+```
+
+Gera um manifesto estilo PS4 (`game.pkg.manifest.json`) com `originalFileSize`, `packageDigest`, `numberOfSplitFiles` e `pieces[]` (url, fileOffset, fileSize, hashValue).
+
+### Split com manifesto PS3 (hfs_manifest XML)
+
+```bash
+python -m file_splitter split "C:\caminho\game.pkg" --ps3 --base-url "http://host.com/download" --part-size 2000000000
+```
+
+Gera um manifesto HFS estilo PS3 (`game.pkg.hfs_manifest.xml`) com `file_name`, `file_size`, `number_of_split_files` e as tags `<pieces file_size="..." index="..." url="..."/>`. As partes sao nomeadas no padrao `game_00.pkg`, `game_01.pkg`, etc. `--base-url` e obrigatorio neste modo.
+
 ### Merge
 
 ```bash

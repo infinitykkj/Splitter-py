@@ -27,6 +27,7 @@ def _cmd_split(args: argparse.Namespace) -> int:
         include_hashes=args.with_hash,
         base_url=args.base_url,
         is_pkg=args.pkg,
+        is_ps3=args.ps3,
     )
     print(f"Split concluido: {manifest_path}")
     return 0
@@ -98,14 +99,20 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include SHA-256 for each part and merged output",
     )
-    split_parser.add_argument(
+    mode_group = split_parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--pkg",
         action="store_true",
-        help="Treat input as PS4 PKG file, generate PS4-style manifest",
+        help="Treat input as PS4 PKG file, generate PS4-style JSON manifest",
+    )
+    mode_group.add_argument(
+        "--ps3",
+        action="store_true",
+        help="Generate PS3 HFS manifest (hfs_manifest XML)",
     )
     split_parser.add_argument(
         "--base-url",
-        help="Base URL for PS4 manifest (e.g., http://gs2.ww.prod.dl.playstation.net/...)",
+        help="Base URL for PS4/PS3 manifest pieces (e.g., https://host.com/download)",
     )
     split_parser.set_defaults(func=_cmd_split)
 
