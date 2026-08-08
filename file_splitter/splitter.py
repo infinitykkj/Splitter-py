@@ -320,7 +320,7 @@ def split_file(
                 f'url="{escape(part.url or "")}"/>'
             )
         manifest_lines.append("</hfs_manifest>")
-        manifest_path = out_dir / f"{base_name}.hfs_manifest.xml"
+        manifest_path = out_dir / f"{base_name}.manifest.xml"
         manifest_path.write_text(
             "\n".join(manifest_lines) + "\n",
             encoding="utf-8",
