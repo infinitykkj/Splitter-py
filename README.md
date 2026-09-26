@@ -26,7 +26,7 @@ Gera um manifesto estilo PS4 (`game.pkg.manifest.json`) com `originalFileSize`, 
 
 ### Manifesto PS4 sem dividir (arquivos ja splitados)
 
-Modo para quando os pedacos **ja existem** no disco no padrao `<prefixo>_<indice>.pkg` e so falta gerar o manifesto oficial de PS4 (ex.: antes de subir para uma release do GitHub):
+Modo para quando os pedacos **ja existem** no disco no padrao `<prefixo>_<indice>.pkg`
 
 
 ```bash
