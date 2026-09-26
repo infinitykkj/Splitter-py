@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 try:
     from .constants import DEFAULT_BUFFER_SIZE, DEFAULT_PART_SIZE
-    from .io_utils import copy_exact_bytes
+    from .io_utils import copy_exact_bytes, sha1_of_file
     from .manifest import Manifest, PartMeta
 except ImportError:  # pragma: no cover - standalone script compatibility
     from constants import DEFAULT_BUFFER_SIZE, DEFAULT_PART_SIZE
-    from io_utils import copy_exact_bytes
+    from io_utils import copy_exact_bytes, sha1_of_file
     from manifest import Manifest, PartMeta
+
+# <prefix>_<index>.pkg / <prefix>-<index>.pkg / <prefix><index>.pkg
+SPLIT_PKG_NAME_RE = re.compile(r"^(?P<prefix>.+?)[_-]?(?P<index>\d+)\.pkg$", re.IGNORECASE)
 
 
 class LocalPKGMetadataExtractor:
@@ -174,6 +178,108 @@ class LocalPKGMetadataExtractor:
         return params
 
 
+def build_ps4_manifest(
+    file_size: int,
+    package_digest: str | None,
+    pieces: list[dict],
+) -> dict:
+    """Build the official PS4 manifest document."""
+    return {
+        "originalFileSize": file_size,
+        "packageDigest": package_digest or "",
+        "numberOfSplitFiles": len(pieces),
+        "pieces": pieces,
+    }
+
+
+def generate_ps4_manifests(
+    directory: str = ".",
+    base_url: str | None = None,
+    output_dir: str | None = None,
+    buffer_size: int = DEFAULT_BUFFER_SIZE,
+) -> list[Path]:
+    """Generate PS4 manifests from already-split ``<prefix>_<index>.pkg`` files.
+
+    Scans *directory* for files named like ``GAME_0.pkg``, ``GAME_1.pkg``, ...
+    and writes one official PS4 manifest per prefix group
+    (``<prefix>.manifest.json``) without writing any part files.
+
+    Pieces are ordered by the numeric index, ``fileOffset`` accumulates,
+    ``hashValue`` is the uppercase SHA-1 of each part and ``packageDigest``
+    comes from the PKG header of the first part (same extractor used by
+    ``split_file``).
+
+    Returns the list of generated manifest paths.
+    """
+    if not base_url:
+        raise ValueError("base_url is required for PS4 manifest generation")
+    if buffer_size <= 0:
+        raise ValueError("buffer_size must be > 0")
+
+    src_dir = Path(directory).resolve()
+    if not src_dir.is_dir():
+        raise NotADirectoryError(f"directory not found: {src_dir}")
+
+    out_dir = Path(output_dir).resolve() if output_dir else src_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    groups: dict[str, list[tuple[int, Path]]] = {}
+    for path in sorted(src_dir.iterdir()):
+        if not path.is_file() or path.suffix.lower() != ".pkg":
+            continue
+        match = SPLIT_PKG_NAME_RE.match(path.name)
+        if not match:
+            print(f"[WARN] Ignorado (padrao <prefixo>_<indice>.pkg esperado): {path.name}")
+            continue
+        groups.setdefault(match.group("prefix"), []).append(
+            (int(match.group("index")), path)
+        )
+
+    if not groups:
+        raise ValueError(f"no <prefix>_<index>.pkg files found in {src_dir}")
+
+    manifest_paths: list[Path] = []
+    for prefix in sorted(groups):
+        entries = sorted(groups[prefix], key=lambda item: item[0])
+        indexes = [index for index, _ in entries]
+        if len(set(indexes)) != len(indexes):
+            raise ValueError(f"duplicate part index in group '{prefix}': {indexes}")
+        missing = sorted(set(range(indexes[-1] + 1)) - set(indexes))
+        if missing:
+            print(f"[WARN] Grupo '{prefix}': indices ausentes {missing}")
+
+        print(f"[INFO] Grupo '{prefix}': {len(entries)} arquivo(s)")
+
+        pkg_metadata = LocalPKGMetadataExtractor(str(entries[0][1]), verbose=False)
+        package_digest = pkg_metadata.extract_metadata().get("header_digest", "")
+
+        pieces: list[dict] = []
+        offset = 0
+        for index, path in entries:
+            size = path.stat().st_size
+            pieces.append(
+                {
+                    "url": f"{base_url.rstrip('/')}/{path.name}",
+                    "fileOffset": offset,
+                    "fileSize": size,
+                    "hashValue": sha1_of_file(str(path), buffer_size).upper(),
+                }
+            )
+            offset += size
+
+        manifest_path = out_dir / f"{prefix}.manifest.json"
+        with open(manifest_path, "w", encoding="utf-8") as fh:
+            json.dump(
+                build_ps4_manifest(offset, package_digest, pieces),
+                fh,
+                indent=2,
+            )
+        print(f"[OK] Manifesto PS4 salvo: {manifest_path}")
+        manifest_paths.append(manifest_path)
+
+    return manifest_paths
+
+
 def split_file(
     input_path: str,
     output_dir: str | None = None,
@@ -287,21 +393,16 @@ def split_file(
         package_digest = pkg_metadata.get('header_digest', '')
 
     if is_pkg and base_url:
-        manifest_data = {
-            "originalFileSize": file_size,
-            "packageDigest": package_digest,
-            "numberOfSplitFiles": len(parts),
-            "pieces": []
-        }
-
-        for part in parts:
-            piece = {
+        pieces = [
+            {
                 "url": part.url,
                 "fileOffset": part.start,
                 "fileSize": part.size,
-                "hashValue": part.sha1.upper() if part.sha1 else ''
+                "hashValue": part.sha1.upper() if part.sha1 else "",
             }
-            manifest_data["pieces"].append(piece)
+            for part in parts
+        ]
+        manifest_data = build_ps4_manifest(file_size, package_digest, pieces)
 
         manifest_path = out_dir / f"{base_name}.manifest.json"
         with open(manifest_path, 'w', encoding='utf-8') as f:

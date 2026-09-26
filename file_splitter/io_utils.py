@@ -43,9 +43,8 @@ def copy_exact_bytes(
     return copied
 
 
-def sha256_of_file(path: str, buffer_size: int) -> str:
-    """Compute SHA-256 hash for a file by streaming bytes."""
-    digest = hashlib.sha256()
+def _hash_of_file(path: str, algorithm: str, buffer_size: int) -> str:
+    digest = hashlib.new(algorithm)
     with open(path, "rb") as fh:
         buffer = bytearray(buffer_size)
         view = memoryview(buffer)
@@ -55,3 +54,13 @@ def sha256_of_file(path: str, buffer_size: int) -> str:
                 break
             digest.update(view[:read_n])
     return digest.hexdigest()
+
+
+def sha1_of_file(path: str, buffer_size: int) -> str:
+    """Compute SHA-1 hash for a file by streaming bytes."""
+    return _hash_of_file(path, "sha1", buffer_size)
+
+
+def sha256_of_file(path: str, buffer_size: int) -> str:
+    """Compute SHA-256 hash for a file by streaming bytes."""
+    return _hash_of_file(path, "sha256", buffer_size)

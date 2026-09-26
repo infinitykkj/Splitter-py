@@ -10,12 +10,12 @@ try:
     from .constants import DEFAULT_BUFFER_SIZE, DEFAULT_PART_SIZE
     from .manifest import Manifest
     from .merger import merge_file
-    from .splitter import split_file
+    from .splitter import generate_ps4_manifests, split_file
 except ImportError:  # pragma: no cover - standalone script compatibility
     from constants import DEFAULT_BUFFER_SIZE, DEFAULT_PART_SIZE
     from manifest import Manifest
     from merger import merge_file
-    from splitter import split_file
+    from splitter import generate_ps4_manifests, split_file
 
 
 def _cmd_split(args: argparse.Namespace) -> int:
@@ -30,6 +30,17 @@ def _cmd_split(args: argparse.Namespace) -> int:
         is_ps3=args.ps3,
     )
     print(f"Split concluido: {manifest_path}")
+    return 0
+
+
+def _cmd_manifest(args: argparse.Namespace) -> int:
+    manifest_paths = generate_ps4_manifests(
+        directory=args.dir,
+        base_url=args.base_url,
+        output_dir=args.output_dir,
+        buffer_size=args.buffer_size,
+    )
+    print(f"Manifestos PS4 gerados: {len(manifest_paths)}")
     return 0
 
 
@@ -115,6 +126,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Base URL for PS4/PS3 manifest pieces (e.g., https://host.com/download)",
     )
     split_parser.set_defaults(func=_cmd_split)
+
+    manifest_parser = subparsers.add_parser(
+        "manifest",
+        help="Generate PS4 manifests from already-split <prefix>_<index>.pkg files",
+        description=(
+            "Scan a directory for already-split PS4 parts (<prefix>_0.pkg, "
+            "<prefix>_1.pkg, ...) and write one official PS4 manifest per "
+            "group, without creating any new part files."
+        ),
+    )
+    manifest_parser.add_argument(
+        "dir",
+        nargs="?",
+        default=".",
+        help="Directory containing the split .pkg files (default: current directory)",
+    )
+    manifest_parser.add_argument(
+        "--base-url",
+        required=True,
+        help="Release base URL for manifest pieces (e.g., https://github.com/user/repo/releases/download/TAG)",
+    )
+    manifest_parser.add_argument(
+        "-o",
+        "--output-dir",
+        help="Directory for the generated manifests (default: input directory)",
+    )
+    manifest_parser.add_argument(
+        "--buffer-size",
+        type=int,
+        default=DEFAULT_BUFFER_SIZE,
+        help=f"Streaming buffer in bytes (default: {DEFAULT_BUFFER_SIZE})",
+    )
+    manifest_parser.set_defaults(func=_cmd_manifest)
 
     merge_parser = subparsers.add_parser("merge", help="Merge parts from a manifest")
     merge_parser.add_argument("manifest", help="Manifest JSON path")
