@@ -43,10 +43,16 @@ def copy_exact_bytes(
     return copied
 
 
-def _hash_of_file(path: str, algorithm: str, buffer_size: int) -> str:
+def _hash_of_file(
+    path: str,
+    algorithm: str,
+    buffer_size: int,
+    buffer: bytearray | None = None,
+) -> str:
     digest = hashlib.new(algorithm)
-    with open(path, "rb") as fh:
+    if buffer is None:
         buffer = bytearray(buffer_size)
+    with open(path, "rb") as fh:
         view = memoryview(buffer)
         while True:
             read_n = fh.readinto(view)
@@ -56,11 +62,11 @@ def _hash_of_file(path: str, algorithm: str, buffer_size: int) -> str:
     return digest.hexdigest()
 
 
-def sha1_of_file(path: str, buffer_size: int) -> str:
+def sha1_of_file(path: str, buffer_size: int, buffer: bytearray | None = None) -> str:
     """Compute SHA-1 hash for a file by streaming bytes."""
-    return _hash_of_file(path, "sha1", buffer_size)
+    return _hash_of_file(path, "sha1", buffer_size, buffer)
 
 
-def sha256_of_file(path: str, buffer_size: int) -> str:
+def sha256_of_file(path: str, buffer_size: int, buffer: bytearray | None = None) -> str:
     """Compute SHA-256 hash for a file by streaming bytes."""
-    return _hash_of_file(path, "sha256", buffer_size)
+    return _hash_of_file(path, "sha256", buffer_size, buffer)

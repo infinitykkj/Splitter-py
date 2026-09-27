@@ -21,6 +21,12 @@ except ImportError:  # pragma: no cover - standalone script compatibility
 # <prefix>_<index>.pkg / <prefix>-<index>.pkg / <prefix><index>.pkg
 SPLIT_PKG_NAME_RE = re.compile(r"^(?P<prefix>.+?)[_-]?(?P<index>\d+)\.pkg$", re.IGNORECASE)
 
+# Hard ceiling for a single metadata range read. Retail PKG entry tables and
+# param.sfo files are a few KiB; anything beyond this is pathological and must
+# never be materialised in RAM (a bogus entry_count would otherwise slurp a
+# whole 1.9 GiB part plus one dict per entry).
+MAX_METADATA_READ_BYTES = 16 * 1024 * 1024
+
 
 class LocalPKGMetadataExtractor:
     """Extrator de metadados de PKG local (sem HTTP)"""
@@ -49,11 +55,34 @@ class LocalPKGMetadataExtractor:
             self._file = None
 
     def _read_range(self, start: int, end: int) -> bytes:
+        length = end - start + 1
+        if length <= 0:
+            return b""
+        if length > MAX_METADATA_READ_BYTES:
+            raise ValueError(
+                f"metadata range too large: {length} bytes "
+                f"(limit {MAX_METADATA_READ_BYTES})"
+            )
         if not self._file:
             self._open()
         self._file.seek(start)
-        length = end - start + 1
         return self._file.read(length)
+
+    def extract_package_digest(self) -> str:
+        """Return the uppercase SHA-256 header digest (0xFE0..0x10FF).
+
+        Only ~1.7 KiB of the PKG header is touched: the entry table and
+        param.sfo are never read, so memory stays constant no matter how
+        large (or bogus) ``entry_count`` is.
+        """
+        try:
+            self._parse_header(self._read_range(0, self.PKG_HEADER_SIZE - 1))
+            digest_sig_data = self._read_range(0xFE0, 0x10FF)
+            if len(digest_sig_data) < 32:
+                raise ValueError("PKG header digest truncated")
+            return digest_sig_data[0:32].hex().upper()
+        finally:
+            self._close()
 
     def extract_metadata(self) -> dict:
         """Extrai metadados completos do PKG local"""
@@ -115,6 +144,12 @@ class LocalPKGMetadataExtractor:
     def _read_entry_table(self, header: dict) -> list:
         table_offset = header['entry_table_offset']
         table_size = header['entry_count'] * self.PKG_TABLE_ENTRY_SIZE
+
+        if table_size > MAX_METADATA_READ_BYTES:
+            raise ValueError(
+                f"PKG entry table too large: {table_size} bytes "
+                f"(entry_count={header['entry_count']})"
+            )
 
         entry_data = self._read_range(table_offset, table_offset + table_size - 1)
 
@@ -239,6 +274,7 @@ def generate_ps4_manifests(
         raise ValueError(f"no <prefix>_<index>.pkg files found in {src_dir}")
 
     manifest_paths: list[Path] = []
+    hash_buffer = bytearray(buffer_size)
     for prefix in sorted(groups):
         entries = sorted(groups[prefix], key=lambda item: item[0])
         indexes = [index for index, _ in entries]
@@ -250,8 +286,9 @@ def generate_ps4_manifests(
 
         print(f"[INFO] Grupo '{prefix}': {len(entries)} arquivo(s)")
 
-        pkg_metadata = LocalPKGMetadataExtractor(str(entries[0][1]), verbose=False)
-        package_digest = pkg_metadata.extract_metadata().get("header_digest", "")
+        package_digest = LocalPKGMetadataExtractor(
+            str(entries[0][1]), verbose=False
+        ).extract_package_digest()
 
         pieces: list[dict] = []
         offset = 0
@@ -262,7 +299,9 @@ def generate_ps4_manifests(
                     "url": f"{base_url.rstrip('/')}/{path.name}",
                     "fileOffset": offset,
                     "fileSize": size,
-                    "hashValue": sha1_of_file(str(path), buffer_size).upper(),
+                    "hashValue": sha1_of_file(
+                        str(path), buffer_size, hash_buffer
+                    ).upper(),
                 }
             )
             offset += size
@@ -384,13 +423,11 @@ def split_file(
             )
             part_index += 1
 
-    pkg_metadata = None
     package_digest = None
     if is_pkg:
         log("Extraindo metadados do PKG...", "INFO")
         pkg_extractor = LocalPKGMetadataExtractor(str(source), verbose=False)
-        pkg_metadata = pkg_extractor.extract_metadata()
-        package_digest = pkg_metadata.get('header_digest', '')
+        package_digest = pkg_extractor.extract_package_digest()
 
     if is_pkg and base_url:
         pieces = [
