@@ -232,6 +232,7 @@ def generate_ps4_manifests(
     base_url: str | None = None,
     output_dir: str | None = None,
     buffer_size: int = DEFAULT_BUFFER_SIZE,
+    no_hash: bool = False,
 ) -> list[Path]:
     """Generate PS4 manifests from already-split ``<prefix>_<index>.pkg`` files.
 
@@ -243,6 +244,9 @@ def generate_ps4_manifests(
     ``hashValue`` is the uppercase SHA-1 of each part and ``packageDigest``
     comes from the PKG header of the first part (same extractor used by
     ``split_file``).
+
+    With ``no_hash=True`` nothing is hashed: ``packageDigest`` and every
+    ``hashValue`` are written as empty strings.
 
     Returns the list of generated manifest paths.
     """
@@ -274,7 +278,7 @@ def generate_ps4_manifests(
         raise ValueError(f"no <prefix>_<index>.pkg files found in {src_dir}")
 
     manifest_paths: list[Path] = []
-    hash_buffer = bytearray(buffer_size)
+    hash_buffer = bytearray(buffer_size) if not no_hash else None
     for prefix in sorted(groups):
         entries = sorted(groups[prefix], key=lambda item: item[0])
         indexes = [index for index, _ in entries]
@@ -286,9 +290,11 @@ def generate_ps4_manifests(
 
         print(f"[INFO] Grupo '{prefix}': {len(entries)} arquivo(s)")
 
-        package_digest = LocalPKGMetadataExtractor(
-            str(entries[0][1]), verbose=False
-        ).extract_package_digest()
+        package_digest = ""
+        if not no_hash:
+            package_digest = LocalPKGMetadataExtractor(
+                str(entries[0][1]), verbose=False
+            ).extract_package_digest()
 
         pieces: list[dict] = []
         offset = 0
@@ -299,9 +305,9 @@ def generate_ps4_manifests(
                     "url": f"{base_url.rstrip('/')}/{path.name}",
                     "fileOffset": offset,
                     "fileSize": size,
-                    "hashValue": sha1_of_file(
-                        str(path), buffer_size, hash_buffer
-                    ).upper(),
+                    "hashValue": ""
+                    if no_hash
+                    else sha1_of_file(str(path), buffer_size, hash_buffer).upper(),
                 }
             )
             offset += size
@@ -328,6 +334,7 @@ def split_file(
     base_url: str | None = None,
     is_pkg: bool = False,
     is_ps3: bool = False,
+    no_hash: bool = False,
 ) -> Path:
     """Split a file and create a manifest.
 
@@ -335,6 +342,9 @@ def split_file(
     - default: JSON manifest (``Manifest``)
     - ``is_pkg=True``: PS4-style JSON manifest (requires ``base_url``)
     - ``is_ps3=True``: PS3 ``hfs_manifest`` XML (requires ``base_url``)
+
+    With ``no_hash=True`` no digest is computed: ``packageDigest`` comes
+    out empty and every ``hashValue``/``sha256`` field is omitted.
 
     Returns the manifest path.
     """
@@ -351,6 +361,9 @@ def split_file(
         raise ValueError("--pkg and --ps3 are mutually exclusive")
     if is_ps3 and not base_url:
         raise ValueError("base_url is required for PS3 (hfs_manifest) output")
+
+    if no_hash:
+        include_hashes = False
 
     source = Path(input_path).resolve()
     if not source.is_file():
@@ -381,7 +394,7 @@ def split_file(
             part_path = out_dir / part_name
 
             part_hash = hashlib.sha256() if include_hashes else None
-            part_sha1 = hashlib.sha1() if is_pkg else None
+            part_sha1 = hashlib.sha1() if is_pkg and not no_hash else None
             hashers = tuple(h for h in (part_hash, part_sha1, global_hash) if h is not None)
 
             with part_path.open("wb") as dst:
@@ -423,8 +436,8 @@ def split_file(
             )
             part_index += 1
 
-    package_digest = None
-    if is_pkg:
+    package_digest = ""
+    if is_pkg and not no_hash:
         log("Extraindo metadados do PKG...", "INFO")
         pkg_extractor = LocalPKGMetadataExtractor(str(source), verbose=False)
         package_digest = pkg_extractor.extract_package_digest()

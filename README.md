@@ -24,6 +24,15 @@ python -m file_splitter split "C:\caminho\game.pkg" --pkg --base-url "http://hos
 
 Gera um manifesto estilo PS4 (`game.pkg.manifest.json`) com `originalFileSize`, `packageDigest`, `numberOfSplitFiles` e `pieces[]` (url, fileOffset, fileSize, hashValue).
 
+### Sem hash (campos vazios, nenhum calculo)
+
+```bash
+python -m file_splitter split "C:\caminho\game.pkg" --pkg --base-url "http://host.com/download" --no-hash
+python -m file_splitter manifest "C:\caminho\pasta" --base-url "http://host.com/download" --no-hash
+```
+
+`--no-hash` desliga todos os hashes: `packageDigest` e cada `hashValue` sao gravados como `""` (e no manifesto generico os campos `sha256`/`sha1` ficam ausentes). Nada e lido para calcular digest. Mutuamente exclusivo com `--with-hash`.
+
 ### Manifesto PS4 sem dividir (arquivos ja splitados)
 
 Modo para quando os pedacos **ja existem** no disco no padrao `<prefixo>_<indice>.pkg`

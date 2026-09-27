@@ -28,6 +28,7 @@ def _cmd_split(args: argparse.Namespace) -> int:
         base_url=args.base_url,
         is_pkg=args.pkg,
         is_ps3=args.ps3,
+        no_hash=args.no_hash,
     )
     print(f"Split concluido: {manifest_path}")
     return 0
@@ -39,6 +40,7 @@ def _cmd_manifest(args: argparse.Namespace) -> int:
         base_url=args.base_url,
         output_dir=args.output_dir,
         buffer_size=args.buffer_size,
+        no_hash=args.no_hash,
     )
     print(f"Manifestos PS4 gerados: {len(manifest_paths)}")
     return 0
@@ -105,10 +107,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_BUFFER_SIZE,
         help=f"Streaming buffer in bytes (default: {DEFAULT_BUFFER_SIZE})",
     )
-    split_parser.add_argument(
+    hash_group = split_parser.add_mutually_exclusive_group()
+    hash_group.add_argument(
         "--with-hash",
         action="store_true",
         help="Include SHA-256 for each part and merged output",
+    )
+    hash_group.add_argument(
+        "--no-hash",
+        action="store_true",
+        help="Skip all hash computation, hash fields come out empty",
     )
     mode_group = split_parser.add_mutually_exclusive_group()
     mode_group.add_argument(
@@ -157,6 +165,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_BUFFER_SIZE,
         help=f"Streaming buffer in bytes (default: {DEFAULT_BUFFER_SIZE})",
+    )
+    manifest_parser.add_argument(
+        "--no-hash",
+        action="store_true",
+        help="Skip all hash computation, packageDigest/hashValue come out empty",
     )
     manifest_parser.set_defaults(func=_cmd_manifest)
 
